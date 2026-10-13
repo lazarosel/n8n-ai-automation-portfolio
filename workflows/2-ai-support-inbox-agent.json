@@ -1,0 +1,1105 @@
+{
+  "name": "[Portfolio] AI customer-support inbox agent",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## AI customer-support inbox agent (RAG)\n**Client request:** *\"We get 200 support emails a day. I want AI to sort them, answer the easy ones automatically, and send the hard ones to the right person.\"*\n\n1. New email arrives (Gmail), or click **Test with sample emails**  2. The help-center articles are embedded into a **vector store** (refreshed daily + on every demo run)  3. **RAG:** each email is semantically matched to the most relevant articles  4. Customer is looked up in the CRM (plan, orders, LTV)  5. **AI (Mistral)** classifies category / urgency / sentiment, scores its confidence and drafts a reply grounded only in the retrieved articles  6. Business rules decide: **auto-send** (simple + confident) · **draft for review** (unsure, or a new lead) · **escalate to Slack** (refunds, angry, urgent, enterprise)  7. Every ticket is logged  8. Daily KPI report to the manager on Slack\n\n*Vector store = n8n Simple Vector Store — swap for Pinecone / Supabase / Qdrant in one node. AI = Mistral — swap for Claude / OpenAI in one node.*",
+        "height": 280,
+        "width": 3360
+      },
+      "id": "4a17aad3-505a-49c8-ba9a-a274c4cd6a7f",
+      "name": "Note: overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🔑 Connect before going live\n- **Mistral Cloud** (free API key) on *Mistral AI* + both *Mistral embeddings* nodes\n- **Gmail** on the trigger + the two Gmail nodes\n- **Slack** on the two Slack nodes",
+        "height": 170,
+        "width": 320,
+        "color": 3
+      },
+      "id": "f220de3c-8178-4788-ae50-04bf2eecc0d3",
+      "name": "Note: credentials",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3260,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 📊 Daily report\nEvery evening the manager gets ticket volume, % answered automatically, breakdown by category and the list of escalations.",
+        "height": 120,
+        "width": 900,
+        "color": 5
+      },
+      "id": "f78c9a5c-d69a-4219-b7a1-2e1a1fd1fff3",
+      "name": "Note: daily report",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "sender": "you@example.com"
+        },
+        "options": {}
+      },
+      "id": "0d09fe95-2237-47f7-88e8-d3cd390c8d79",
+      "name": "New support email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        900,
+        -160
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "453ca06f-b64b-465f-aa3c-91998a14914e",
+      "name": "Test with sample emails",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Realistic test emails in the same shape the Gmail Trigger outputs,\n// so the whole workflow can be demoed without a live inbox.\nconst emails = [\n  {\n    from: 'Mark Olsen <mark.olsen@gmail.com>',\n    subject: \"Can't log in to my account\",\n    text: \"Hi, I forgot my password and now I'm locked out. How do I reset it? Thanks, Mark\",\n  },\n  {\n    from: 'Priya Natarajan <priya@northwind.co>',\n    subject: 'URGENT: API returning 500 errors in production',\n    text: 'Since 9am every call to your orders API returns a 500 error. Our checkout is down and we are losing sales. We need someone on this right now.',\n  },\n  {\n    from: 'Tom Becker <tom.becker@outlook.com>',\n    subject: 'Refund NOW',\n    text: \"This is the second time my order arrived broken. I want my money back today or I'm filing a chargeback. Absolutely unacceptable.\",\n  },\n  {\n    from: 'Sarah Chen <sarah.chen@brightpixel.io>',\n    subject: 'Where can I find my invoices?',\n    text: 'Hi team, our accountant needs last month\\'s invoice and I need to add our VAT number to it. Where do I do that? Thanks!',\n  },\n  {\n    from: 'Jess Walker <jess@freshbakery.ca>',\n    subject: 'Shipping to Canada?',\n    text: \"Hello! I'm thinking about ordering for my bakery. Do you ship to Canada, and how long does delivery usually take?\",\n  },\n];\n\nreturn emails.map((e, i) => {\n  const [, name, address] = e.from.match(/^(.*) <(.*)>$/);\n  return {\n    json: {\n      id: `sample-${i + 1}`,\n      threadId: `sample-thread-${i + 1}`,\n      from: { value: [{ name, address }] },\n      subject: e.subject,\n      text: e.text,\n    },\n  };\n});"
+      },
+      "id": "7e6f5903-1aed-4c4d-8a16-a88cf1f9c9ca",
+      "name": "Sample support emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        220
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "26ab17f3-4f24-4822-88e8-eb80189d94e5",
+              "name": "email",
+              "value": "={{ ($json.from?.value?.[0]?.address || '').toLowerCase() }}",
+              "type": "string"
+            },
+            {
+              "id": "f34bdb73-872b-491c-861f-34f07e2018cb",
+              "name": "name",
+              "value": "={{ $json.from?.value?.[0]?.name || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "dfbf931b-8b50-458a-b004-e1a02d446182",
+              "name": "subject",
+              "value": "={{ $json.subject || '(no subject)' }}",
+              "type": "string"
+            },
+            {
+              "id": "72db23b0-1dae-4a11-8bbb-b3017f252583",
+              "name": "body",
+              "value": "={{ ($json.text || $json.snippet || '').slice(0, 4000) }}",
+              "type": "string"
+            },
+            {
+              "id": "4890f009-2a22-4613-883e-9b34c21959a9",
+              "name": "message_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "2ba1f885-12fd-457a-ba7e-ecd0d133afa8",
+              "name": "thread_id",
+              "value": "={{ $json.threadId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b08bc36c-9ca0-4d40-a82f-259fa75d75e1",
+      "name": "Normalize email",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CUSTOMERS_TABLE_ID"
+        },
+        "returnAll": true
+      },
+      "id": "fd668316-ae36-44f8-b803-23931b01caf0",
+      "name": "Load customer DB",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_KNOWLEDGE_BASE_TABLE_ID"
+        },
+        "returnAll": true
+      },
+      "id": "f6e835a2-24f0-4a98-b291-9a3f5dc7dcfc",
+      "name": "Load knowledge base",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        220
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CUSTOMER\nName: {{ $json.customer_name }}\nExisting customer: {{ $json.is_customer }}\nPlan: {{ $json.plan }} | Orders: {{ $json.orders }} | Lifetime value: ${{ $json.lifetime_value }}\n\nEMAIL\nFrom: {{ $json.email }}\nSubject: {{ $json.subject }}\nBody:\n{{ $json.body }}\n\nKNOWLEDGE BASE (most relevant articles)\n{{ $json.kb_context }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a senior customer support agent for Acme, a SaaS + e-commerce company. Triage the incoming email and draft a reply.\n\nRules:\n- Only use facts from the KNOWLEDGE BASE and CUSTOMER sections. Never invent policies, prices, dates or promises.\n- If the knowledge base does not fully answer the question, set needs_human = true and write a short, warm holding reply saying a specialist will follow up.\n- confidence (0 to 1) = how sure you are that your reply fully and correctly resolves the request.\n- Replies: friendly, concise (under 150 words), use the customer's first name, sign off as \"The Acme Support Team\".\n- category must be one of: account, billing, refund, shipping, technical, sales, spam, other.\n- Category guide: account = login, password, profile; billing = invoices, payments, VAT; refund = money-back requests; shipping = delivery times and countries; technical = bugs, errors, API or integration problems; sales = pre-purchase questions about plans or pricing.\n- Urgency guide: high = outage, business impact, chargeback or legal threat; medium = customer is blocked but a self-service fix exists; low = general questions.\n- When needs_human is true, the reply only acknowledges the issue and says a specialist will follow up shortly. No timelines, troubleshooting steps or promises.\n- The reply is a plain-text email: no markdown (no **bold**, no bullet symbols).\n- Output must be strictly valid JSON: inside string values write line breaks as \\n, never as raw line breaks. The reply value starts directly with the greeting, e.g. \"reply\": \"Hi Jess,\\n\\nThanks for reaching out...\\n\\nThe Acme Support Team\""
+            }
+          ]
+        },
+        "batching": {
+          "batchSize": 1,
+          "delayBetweenBatches": 3000
+        }
+      },
+      "id": "af4e989a-f41d-4626-9aaa-74b58f7a4a85",
+      "name": "AI triage & draft reply",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2000,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"category\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"account\",\n        \"billing\",\n        \"refund\",\n        \"shipping\",\n        \"technical\",\n        \"sales\",\n        \"spam\",\n        \"other\"\n      ]\n    },\n    \"urgency\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"low\",\n        \"medium\",\n        \"high\"\n      ]\n    },\n    \"sentiment\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"positive\",\n        \"neutral\",\n        \"frustrated\",\n        \"angry\"\n      ]\n    },\n    \"confidence\": {\n      \"type\": \"number\",\n      \"description\": \"0 to 1\"\n    },\n    \"needs_human\": {\n      \"type\": \"boolean\"\n    },\n    \"summary\": {\n      \"type\": \"string\",\n      \"description\": \"One-sentence summary of the request\"\n    },\n    \"reply\": {\n      \"type\": \"string\",\n      \"description\": \"The email reply to send to the customer\"\n    }\n  },\n  \"required\": [\n    \"category\",\n    \"urgency\",\n    \"sentiment\",\n    \"confidence\",\n    \"needs_human\",\n    \"summary\",\n    \"reply\"\n  ]\n}"
+      },
+      "id": "3fc3a82e-efe5-4857-9d85-54bf54f8a1bc",
+      "name": "Structured output",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2140,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Business rules: what the AI may answer on its own vs. what a human must see\nconst AUTO_SEND_CATEGORIES = ['account', 'billing', 'shipping'];\nconst AUTO_SEND_MIN_CONFIDENCE = 0.85;\n\nreturn $input.all().map((item, i) => {\n  const ticket = $('Match customer & attach KB articles').itemMatching(i).json;\n  const ai = item.json.output;\n  const reasons = [];\n\n  if (ai.needs_human) reasons.push('AI could not answer from the knowledge base');\n  if (ai.category === 'refund') reasons.push('Refund request');\n  if (ai.sentiment === 'angry') reasons.push('Angry customer');\n  if (ai.urgency === 'high') reasons.push('High urgency');\n  if (ticket.plan === 'Enterprise') reasons.push('Enterprise account');\n\n  let route;\n  if (ai.category === 'spam') {\n    route = 'spam';\n    reasons.push('Spam');\n  } else if (reasons.length) {\n    route = 'escalate';\n  } else if (!ticket.is_customer) {\n    route = 'draft';\n    reasons.push('New lead (not yet a customer): a human personalises the reply');\n  } else if (ai.confidence >= AUTO_SEND_MIN_CONFIDENCE && AUTO_SEND_CATEGORIES.includes(ai.category) && ticket.kb_matches > 0) {\n    route = 'auto_reply';\n    reasons.push(`Confident (${ai.confidence}) answer from knowledge base`);\n  } else {\n    route = 'draft';\n    reasons.push(`Confidence ${ai.confidence} or category \"${ai.category}\" needs a human check`);\n  }\n\n  return {\n    json: {\n      ...ticket,\n      ...ai,\n      reply: String(ai.reply || '').replace(/\\*\\*(.+?)\\*\\*/g, '$1'), // plain-text email: strip markdown bold\n      route,\n      route_reason: reasons.join(', '),\n    },\n    pairedItem: { item: i },\n  };\n});"
+      },
+      "id": "3e1ef7e4-d5fd-4607-949e-a3e482d1432c",
+      "name": "Apply routing rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SUPPORT_TICKETS_TABLE_ID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $json.email }}",
+            "customer_name": "={{ $json.customer_name }}",
+            "subject": "={{ $json.subject }}",
+            "category": "={{ $json.category }}",
+            "urgency": "={{ $json.urgency }}",
+            "sentiment": "={{ $json.sentiment }}",
+            "confidence": "={{ $json.confidence }}",
+            "route": "={{ $json.route }}",
+            "reply_draft": "={{ $json.reply }}",
+            "plan": "={{ $json.plan }}",
+            "created_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "urgency",
+              "displayName": "urgency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "route",
+              "displayName": "route",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "reply_draft",
+              "displayName": "reply_draft",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "plan",
+              "displayName": "plan",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4467c025-a11c-409d-b50a-30ed8095377e",
+      "name": "Log ticket",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b16e15e7-1575-4efe-b7f0-02768c8f3472",
+                    "leftValue": "={{ $('Apply routing rules').item.json.route }}",
+                    "rightValue": "auto_reply",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Auto-reply"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "271b8903-156f-4463-8b1d-5fbd7a505196",
+                    "leftValue": "={{ $('Apply routing rules').item.json.route }}",
+                    "rightValue": "draft",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Human review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7c7f52a9-f726-4086-8b71-e6eaa3583352",
+                    "leftValue": "={{ $('Apply routing rules').item.json.route }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Escalate"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5a569a7c-b875-4946-891b-12821f20a9cc",
+      "name": "Route ticket",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=Re: {{ $('Apply routing rules').item.json.subject }}",
+        "emailType": "text",
+        "message": "={{ $('Apply routing rules').item.json.reply }}\n\n---\n[Demo mode: in production this goes to {{ $('Apply routing rules').item.json.email }}]",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "8516b6ea-c07c-4e43-bb68-0be4514d4f30",
+      "name": "Auto-send reply",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3020,
+        -200
+      ],
+      "webhookId": "79b06a78-eb3e-44a1-97d1-f8f4ae824a93"
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "=Re: {{ $('Apply routing rules').item.json.subject }}",
+        "emailType": "text",
+        "message": "={{ $('Apply routing rules').item.json.reply }}\n\n---\n[Demo mode: in production this goes to {{ $('Apply routing rules').item.json.email }}]",
+        "options": {
+          "sendTo": "you@example.com"
+        }
+      },
+      "id": "3a2dbbde-f6a6-4243-8d49-fb0fcefc76e0",
+      "name": "Save draft for human review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3020,
+        0
+      ],
+      "webhookId": "08ec2d82-6337-47d8-9a63-ee391e5b2566"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#support-escalations"
+        },
+        "text": "=:sos: *Ticket escalated* — {{ $('Apply routing rules').item.json.urgency }} urgency, {{ $('Apply routing rules').item.json.sentiment }} customer\n*From:* {{ $('Apply routing rules').item.json.customer_name }} <{{ $('Apply routing rules').item.json.email }}> · {{ $('Apply routing rules').item.json.plan }} plan · ${{ Number($('Apply routing rules').item.json.lifetime_value).toLocaleString('en-US') }} lifetime value\n*Subject:* {{ $('Apply routing rules').item.json.subject }}\n*Category:* {{ $('Apply routing rules').item.json.category }}\n*Why escalated:* {{ $('Apply routing rules').item.json.route_reason }}\n*AI summary:* {{ $('Apply routing rules').item.json.summary }}\n*Suggested reply:*\n>{{ $('Apply routing rules').item.json.reply.replace(/\\n/g, '\\n>') }}",
+        "otherOptions": {},
+        "authentication": "oAuth2"
+      },
+      "id": "6ef11df5-17ef-4918-bfdf-fe116be0e962",
+      "name": "Escalate to support lead",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        3020,
+        200
+      ],
+      "webhookId": "9d7967ff-ba10-4bf0-b820-7de32c7a4eda"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 18
+            }
+          ]
+        }
+      },
+      "id": "288928c4-73cc-432b-9ad1-c08abf43f5ab",
+      "name": "Every day at 6 PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SUPPORT_TICKETS_TABLE_ID"
+        },
+        "returnAll": true
+      },
+      "id": "9688e14d-f7e4-4524-89dd-52c78a448fc8",
+      "name": "Load ticket log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        800
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Daily KPI summary for the support manager\nconst today = $now.toISODate();\nconst tickets = $input.all().map(i => i.json).filter(t => (t.created_at || '').startsWith(today));\n\nif (!tickets.length) {\n  return [{ json: { text: `:bar_chart: *Support summary — ${today}*\\nNo tickets today. :tada:` } }];\n}\n\nconst LABELS = { auto_reply: 'Answered automatically', draft: 'Drafted for human review', escalate: 'Escalated', spam: 'Spam' };\nconst breakdown = key => Object.entries(\n  tickets.reduce((acc, t) => ({ ...acc, [t[key]]: (acc[t[key]] || 0) + 1 }), {})\n).sort((a, b) => b[1] - a[1]).map(([k, v]) => `• ${LABELS[k] || k}: ${v}`).join('\\n');\n\nconst auto = tickets.filter(t => t.route === 'auto_reply').length;\nconst escalated = tickets.filter(t => t.route === 'escalate');\nconst avgConfidence = tickets.reduce((s, t) => s + (Number(t.confidence) || 0), 0) / tickets.length;\n\nconst text = [\n  `:bar_chart: *Support summary — ${today}*`,\n  `*${tickets.length}* tickets | *${Math.round(auto / tickets.length * 100)}%* answered automatically | avg AI confidence *${avgConfidence.toFixed(2)}*`,\n  '',\n  '*By category*', breakdown('category'),\n  '',\n  '*By outcome*', breakdown('route'),\n  '',\n  escalated.length ? `*Escalated (${escalated.length})*\\n` + escalated.map(t => `• ${t.customer_name} — ${t.subject}`).join('\\n') : '*No escalations* :white_check_mark:',\n].join('\\n');\n\nreturn [{ json: { text, total: tickets.length, auto_resolved: auto, escalated: escalated.length } }];"
+      },
+      "id": "4cc8a595-b3ed-4c6c-824b-0a9a6d876e80",
+      "name": "Build daily summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#support-managers"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {},
+        "authentication": "oAuth2"
+      },
+      "id": "169622bd-8562-490f-a2f3-4a971352f02b",
+      "name": "Send summary to manager",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        660,
+        800
+      ],
+      "webhookId": "53ebc3da-892f-4b6e-a15e-85aaf7e6cec0"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "26336602-4389-4798-9cbe-87e2e44092f4",
+      "name": "Every day at 6 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "memoryKey": {
+          "__rl": true,
+          "mode": "id",
+          "value": "acme_support_kb"
+        },
+        "clearStore": true,
+        "embeddingBatchSize": 200
+      },
+      "id": "c1105faf-e9f3-4136-a6d5-565d04549973",
+      "name": "Store KB in vector store",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        440,
+        220
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "dataType": "json",
+        "jsonMode": "expressionData",
+        "jsonData": "={{ '## ' + $json.topic + '\\n' + $json.answer }}",
+        "textSplittingMode": "simple",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "topic",
+                "value": "={{ $json.topic }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "70fa9b5c-10f4-4887-9427-56d346c09752",
+      "name": "KB article loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        500,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "model": "mistral-embed",
+        "options": {}
+      },
+      "id": "619af575-2155-474a-bebb-afb2be28f4e9",
+      "name": "Mistral embeddings (index)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsMistralCloud",
+      "typeVersion": 1,
+      "position": [
+        380,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "10936e5e-a7a6-4cba-b4d9-6d382ea6f6aa",
+              "leftValue": "={{ $('Test with sample emails').isExecuted }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ef327ad3-2115-4a30-8b54-28c95930fa82",
+      "name": "Demo run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "memoryKey": {
+          "__rl": true,
+          "mode": "id",
+          "value": "acme_support_kb"
+        },
+        "prompt": "={{ $json.subject }}\n{{ $json.body }}",
+        "topK": 3,
+        "includeDocumentMetadata": true
+      },
+      "id": "c528463c-ab88-4d3a-8b82-a7d8abee3f26",
+      "name": "Search knowledge base (RAG)",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        1340,
+        0
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "model": "mistral-embed",
+        "options": {}
+      },
+      "id": "49c22e27-1910-4e1c-b20a-c04581182edb",
+      "name": "Mistral embeddings (search)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsMistralCloud",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine each email with its CRM record and the knowledge-base articles the vector search found for it\nconst MIN_SCORE = 0.75; // similarity threshold (mistral-embed): below this an article is not considered relevant\nconst MAX_GAP = 0.03;   // also drop hits that score clearly lower than the best match for the same email\nconst TOP_K = 3;\nconst customers = $('Load customer DB').all().map(i => i.json);\nconst hits = $('Search knowledge base (RAG)').all();\n\nreturn $('Normalize email').all().map((item, index) => {\n  const email = item.json;\n  const customer = customers.find(c => c.email === email.email);\n  const articles = hits\n    .filter((h, n) => {\n      const p = Array.isArray(h.pairedItem) ? h.pairedItem[0] : h.pairedItem;\n      return typeof p?.item === 'number' ? p.item === index : Math.floor(n / TOP_K) === index;\n    })\n    .filter(h => h.json.document && h.json.score >= MIN_SCORE)\n    .filter((h, n, arr) => h.json.score >= Math.max(...arr.map(x => x.json.score)) - MAX_GAP)\n    .map(h => ({\n      topic: h.json.document.metadata?.topic || 'Article',\n      text: h.json.document.pageContent,\n      score: Math.round(h.json.score * 100) / 100,\n    }));\n\n  return {\n    json: {\n      ...email,\n      is_customer: Boolean(customer),\n      customer_name: customer?.name || email.name || 'Unknown',\n      plan: customer?.plan || 'Not a customer',\n      orders: customer?.orders || 0,\n      lifetime_value: customer?.lifetime_value || 0,\n      kb_matches: articles.length,\n      kb_sources: articles.map(a => `${a.topic} (${a.score})`).join(', ') || 'none',\n      kb_context: articles.length\n        ? articles.map(a => a.text).join('\\n\\n')\n        : 'No matching articles found.',\n    },\n    pairedItem: { item: index },\n  };\n});"
+      },
+      "id": "0884b3c1-5858-4e7b-b169-91b89f619cc1",
+      "name": "Match customer & attach KB articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": "open-mistral-nemo",
+        "options": {
+          "temperature": 0,
+          "maxRetries": 4
+        }
+      },
+      "id": "e3ac6b09-7829-48cb-9841-3420d44543fd",
+      "name": "Mistral AI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatMistralCloud",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🛡️ Demo mode\nThe trigger only reads emails **from you@example.com**, and every reply/draft is addressed **to you@example.com**, so no real customer is ever emailed.\nFor production: remove the sender filter and set *To* to the customer's email.",
+        "height": 180,
+        "width": 320,
+        "color": 5
+      },
+      "id": "fca2233f-cb18-4b4e-8bb0-770fd2898730",
+      "name": "Note: demo mode",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3260,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "New support email": {
+      "main": [
+        [
+          {
+            "node": "Normalize email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test with sample emails": {
+      "main": [
+        [
+          {
+            "node": "Load knowledge base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample support emails": {
+      "main": [
+        [
+          {
+            "node": "Normalize email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize email": {
+      "main": [
+        [
+          {
+            "node": "Search knowledge base (RAG)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load customer DB": {
+      "main": [
+        [
+          {
+            "node": "Match customer & attach KB articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load knowledge base": {
+      "main": [
+        [
+          {
+            "node": "Store KB in vector store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured output": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI triage & draft reply",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI triage & draft reply": {
+      "main": [
+        [
+          {
+            "node": "Apply routing rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply routing rules": {
+      "main": [
+        [
+          {
+            "node": "Log ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log ticket": {
+      "main": [
+        [
+          {
+            "node": "Route ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route ticket": {
+      "main": [
+        [
+          {
+            "node": "Auto-send reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save draft for human review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate to support lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every day at 6 PM": {
+      "main": [
+        [
+          {
+            "node": "Load ticket log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load ticket log": {
+      "main": [
+        [
+          {
+            "node": "Build daily summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build daily summary": {
+      "main": [
+        [
+          {
+            "node": "Send summary to manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every day at 6 AM": {
+      "main": [
+        [
+          {
+            "node": "Load knowledge base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KB article loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Store KB in vector store",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral embeddings (index)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Store KB in vector store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store KB in vector store": {
+      "main": [
+        [
+          {
+            "node": "Demo run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Demo run?": {
+      "main": [
+        [
+          {
+            "node": "Sample support emails",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mistral embeddings (search)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Search knowledge base (RAG)",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search knowledge base (RAG)": {
+      "main": [
+        [
+          {
+            "node": "Load customer DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match customer & attach KB articles": {
+      "main": [
+        [
+          {
+            "node": "AI triage & draft reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral AI": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI triage & draft reply",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

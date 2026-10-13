@@ -1,0 +1,751 @@
+{
+  "name": "[Portfolio] AI invoice processing → Google Sheets → Slack",
+  "nodes": [
+    {
+      "parameters": {
+        "width": 2460,
+        "height": 240,
+        "content": "## AI invoice processing → Google Sheets → Slack\n**Client request:** *\"Our suppliers send PDF invoices. Somebody types each one into a spreadsheet by hand, mistakes slip through and nobody notices duplicates. Automate it.\"*\n\n1. Invoice PDF is uploaded through a form, or click **Test with sample invoice**  2. Text is extracted from the PDF  3. **AI (Mistral)** pulls out vendor, invoice no., dates, currency, totals and every line item as structured data  4. The sheet is checked for a **duplicate** invoice  5. **Validation rules:** line items must add up, subtotal + tax = total, qty × price = amount, overdue check  6. Status is set: ✅ Ready to pay · ✋ Needs approval (over €2,000) · ⚠️ Needs review (any failed check)  7. Invoice + line items are saved to **Google Sheets**  8. Finance gets a **Slack** summary\n\n*Swap the form for a Gmail / Google Drive / Outlook trigger in one node. AI = Mistral — swap for Claude / OpenAI in one node.*"
+      },
+      "id": "0bd73de2-98f1-4773-b00f-79765c39d33c",
+      "name": "Note: overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "width": 300,
+        "height": 150,
+        "color": 3,
+        "content": "### 🔑 Connections\n- **Mistral Cloud** (free) on *Mistral AI*\n- **Google Sheets** on the 3 Sheets nodes\n- **Slack** on *Notify finance*"
+      },
+      "id": "ba20631d-aeae-4d4d-a596-9195a6864656",
+      "name": "Note: credentials",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2040,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Submit a supplier invoice",
+        "formDescription": "Upload the invoice PDF. It will be read, checked and logged automatically.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Invoice PDF",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e9f38599-6ce5-4dd7-b5a5-62d73e0289b4",
+      "name": "Upload invoice",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "50b233d2-101e-40f4-ba8f-5be74354496d"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The form stores the upload under a field-specific key; rename it to \"invoice\" so both paths look the same\nreturn $input.all().map(item => {\n  const key = Object.keys(item.binary || {})[0];\n  if (!key) throw new Error('No PDF was uploaded');\n  return { json: { source: 'Upload form', file_name: item.binary[key].fileName }, binary: { invoice: item.binary[key] } };\n});"
+      },
+      "id": "e17fbe9c-c60a-4040-aa9b-2d4a476dd6e5",
+      "name": "Get PDF from upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "880d88d2-267d-4649-b738-24e8a4433a2b",
+      "name": "Test with sample invoice",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A realistic supplier invoice (PDF, base64) so the workflow can be demoed without uploading a file\nreturn [{ json: { source: 'Sample invoice', file_name: 'INV-2026-0417_BrightPath-Logistics.pdf', pdf_base64: 'JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiAvRjIgNSAwIFIgPj4gPj4gL0NvbnRlbnRzIDYgMCBSID4+CmVuZG9iago0IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyA+PgplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EtQm9sZCAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyA+PgplbmRvYmoKNiAwIG9iago8PCAvTGVuZ3RoIDIwMTEgPj4Kc3RyZWFtCkJUIC9GMiAyMCBUZiA1MCA3OTAgVGQgKEJyaWdodFBhdGggTG9naXN0aWNzIEx0ZC4pIFRqIEVUCkJUIC9GMSAxMCBUZiA1MCA3NzIgVGQgKDQyIEhhcmJvdXIgUm9hZCwgUGlyYWV1cyAxODUgMzgsIEdyZWVjZSkgVGogRVQKQlQgL0YxIDEwIFRmIDUwIDc1OCBUZCAoYmlsbGluZ0BicmlnaHRwYXRoLWxvZ2lzdGljcy5leGFtcGxlKSBUaiBFVApCVCAvRjEgMTAgVGYgNTAgNzQ0IFRkIChWQVQ6IEVMIDk5ODg3NzY2NSkgVGogRVQKQlQgL0YyIDE4IFRmIDQwMCA3OTAgVGQgKElOVk9JQ0UpIFRqIEVUCkJUIC9GMSAxMCBUZiA0MDAgNzcyIFRkIChJbnZvaWNlIG5vOiBJTlYtMjAyNi0wNDE3KSBUaiBFVApCVCAvRjEgMTAgVGYgNDAwIDc1OCBUZCAoSW52b2ljZSBkYXRlOiAyMDI2LTEwLTA1KSBUaiBFVApCVCAvRjEgMTAgVGYgNDAwIDc0NCBUZCAoRHVlIGRhdGU6IDIwMjYtMTEtMDQpIFRqIEVUCkJUIC9GMSAxMCBUZiA0MDAgNzMwIFRkIChQTyBudW1iZXI6IFBPLTU1ODIxKSBUaiBFVApCVCAvRjIgMTEgVGYgNTAgNzE1IFRkIChCaWxsIHRvOikgVGogRVQKQlQgL0YxIDEwIFRmIDUwIDcwMCBUZCAoQWNtZSBDbywgQWNjb3VudHMgUGF5YWJsZSwgMTAgTWFya2V0IFN0LCBBdGhlbnMpIFRqIEVUCkJUIC9GMiAxMCBUZiA1MCA2NjAgVGQgKERlc2NyaXB0aW9uKSBUaiBFVApCVCAvRjIgMTAgVGYgMzMwIDY2MCBUZCAoUXR5KSBUaiBFVApCVCAvRjIgMTAgVGYgMzkwIDY2MCBUZCAoVW5pdCBwcmljZSkgVGogRVQKQlQgL0YyIDEwIFRmIDQ5MCA2NjAgVGQgKEFtb3VudCkgVGogRVQKQlQgL0YxIDEwIFRmIDUwIDY0MCBUZCAoUGFsbGV0IGZyZWlnaHQgQXRoZW5zIC0gVGhlc3NhbG9uaWtpKSBUaiBFVApCVCAvRjEgMTAgVGYgMzMwIDY0MCBUZCAoMTIpIFRqIEVUCkJUIC9GMSAxMCBUZiAzOTAgNjQwIFRkICg4NS4wMCkgVGogRVQKQlQgL0YxIDEwIFRmIDQ5MCA2NDAgVGQgKDEsMDIwLjAwKSBUaiBFVApCVCAvRjEgMTAgVGYgNTAgNjI0IFRkIChXYXJlaG91c2Ugc3RvcmFnZSwgcGVyIHBhbGxldCwgT2N0b2JlcikgVGogRVQKQlQgL0YxIDEwIFRmIDMzMCA2MjQgVGQgKDMwKSBUaiBFVApCVCAvRjEgMTAgVGYgMzkwIDYyNCBUZCAoMTQuNTApIFRqIEVUCkJUIC9GMSAxMCBUZiA0OTAgNjI0IFRkICg0MzUuMDApIFRqIEVUCkJUIC9GMSAxMCBUZiA1MCA2MDggVGQgKEV4cHJlc3MgY3VzdG9tcyBjbGVhcmFuY2UpIFRqIEVUCkJUIC9GMSAxMCBUZiAzMzAgNjA4IFRkICgyKSBUaiBFVApCVCAvRjEgMTAgVGYgMzkwIDYwOCBUZCAoMTIwLjAwKSBUaiBFVApCVCAvRjEgMTAgVGYgNDkwIDYwOCBUZCAoMjQwLjAwKSBUaiBFVApCVCAvRjEgMTAgVGYgNTAgNTkyIFRkIChGdWVsIHN1cmNoYXJnZSkgVGogRVQKQlQgL0YxIDEwIFRmIDMzMCA1OTIgVGQgKDEpIFRqIEVUCkJUIC9GMSAxMCBUZiAzOTAgNTkyIFRkICg2NS4wMCkgVGogRVQKQlQgL0YxIDEwIFRmIDQ5MCA1OTIgVGQgKDY1LjAwKSBUaiBFVApCVCAvRjEgMTAgVGYgMzkwIDU2MCBUZCAoU3VidG90YWwpIFRqIEVUCkJUIC9GMSAxMCBUZiA0OTAgNTYwIFRkIChFVVIgMSw3NjAuMDApIFRqIEVUCkJUIC9GMSAxMCBUZiAzOTAgNTQ0IFRkIChWQVQgMjQlKSBUaiBFVApCVCAvRjEgMTAgVGYgNDkwIDU0NCBUZCAoRVVSIDQyMi40MCkgVGogRVQKQlQgL0YyIDExIFRmIDM5MCA1MjYgVGQgKFRvdGFsIGR1ZSkgVGogRVQKQlQgL0YyIDExIFRmIDQ5MCA1MjYgVGQgKEVVUiAyLDE4Mi40MCkgVGogRVQKQlQgL0YxIDEwIFRmIDUwIDQ4MCBUZCAoUGF5bWVudCB0ZXJtczogTmV0IDMwLiBCYW5rIHRyYW5zZmVyIHRvIElCQU4gR1IxNiAwMTEwIDEyNTAgMDAwMCAwMDAxIDIzMDAgNjk1IC0gRGVtbyBCYW5rLikgVGogRVQKQlQgL0YxIDEwIFRmIDUwIDQ2NiBUZCAoUGxlYXNlIHF1b3RlIHRoZSBpbnZvaWNlIG51bWJlciB3aXRoIHlvdXIgcGF5bWVudC4gVGhhbmsgeW91IGZvciB5b3VyIGJ1c2luZXNzISkgVGogRVQKMC44IHcgNTAgNjcwIG0gNTQ1IDY3MCBsIFMgNTAgNTc1IG0gNTQ1IDU3NSBsIFMKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNwowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNTEgMDAwMDAgbiAKMDAwMDAwMDM0OCAwMDAwMCBuIAowMDAwMDAwNDUwIDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNyAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKMjUxMwolJUVPRgo=' } }];"
+      },
+      "id": "38ff1b95-bf8f-4157-942c-a3ff9aba5610",
+      "name": "Sample invoice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "pdf_base64",
+        "binaryPropertyName": "invoice",
+        "options": {
+          "fileName": "={{ $json.file_name }}",
+          "mimeType": "application/pdf"
+        }
+      },
+      "id": "78288408-f1dd-4024-84b6-8b6e7827782a",
+      "name": "Convert to PDF file",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "invoice",
+        "options": {
+          "joinPages": true,
+          "keepSource": "both"
+        }
+      },
+      "id": "c797351d-bd1c-4643-8eac-f39c3e0625c0",
+      "name": "Read PDF text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 1,
+          "delayBetweenBatches": 1500
+        },
+        "text": "=Extract the data from this supplier invoice.\n\nINVOICE TEXT:\n{{ $json.text }}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "You are an accounts-payable assistant. You extract data from the text of supplier invoice PDFs.\n\nRules:\n- Copy values exactly as they appear on the invoice. Never guess or invent values. Use an empty string (or 0 for numbers) when a value is not on the invoice.\n- Dates as YYYY-MM-DD. Currency as a 3-letter ISO code (EUR, USD, GBP...).\n- Numbers as plain numbers without currency symbols or thousands separators (e.g. 1,020.00 becomes 1020).\n- line_items: every billable line, in the order shown (not the subtotal, tax or total rows). In the text, each line row ends with exactly three numbers: quantity, unit price, amount. Everything before those three numbers is the description, even if it contains numbers or dates. quantity x unit price must equal amount; use this to pick the right quantity. Example: \"Office cleaning, March 25 10.00 250.00\" means description \"Office cleaning, March\", quantity 25, unit_price 10, amount 250."
+            }
+          ]
+        }
+      },
+      "id": "7b655e44-55b5-44ad-af0b-31ccea81fbc4",
+      "name": "AI invoice extraction",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        880,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "model": "open-mistral-nemo",
+        "options": {
+          "temperature": 0.2,
+          "maxRetries": 4
+        }
+      },
+      "id": "ea57551d-9b2d-4ede-aa87-83a4cee6a6f9",
+      "name": "Mistral AI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatMistralCloud",
+      "typeVersion": 1,
+      "position": [
+        840,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"vendor_name\": {\n      \"type\": \"string\"\n    },\n    \"vendor_email\": {\n      \"type\": \"string\"\n    },\n    \"invoice_number\": {\n      \"type\": \"string\"\n    },\n    \"invoice_date\": {\n      \"type\": \"string\",\n      \"description\": \"YYYY-MM-DD\"\n    },\n    \"due_date\": {\n      \"type\": \"string\",\n      \"description\": \"YYYY-MM-DD, or empty\"\n    },\n    \"currency\": {\n      \"type\": \"string\",\n      \"description\": \"3-letter ISO code, e.g. EUR\"\n    },\n    \"po_number\": {\n      \"type\": \"string\"\n    },\n    \"payment_terms\": {\n      \"type\": \"string\"\n    },\n    \"subtotal\": {\n      \"type\": \"number\"\n    },\n    \"tax\": {\n      \"type\": \"number\"\n    },\n    \"total\": {\n      \"type\": \"number\"\n    },\n    \"line_items\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"description\": {\n            \"type\": \"string\"\n          },\n          \"quantity\": {\n            \"type\": \"number\"\n          },\n          \"unit_price\": {\n            \"type\": \"number\"\n          },\n          \"amount\": {\n            \"type\": \"number\"\n          }\n        },\n        \"required\": [\n          \"description\",\n          \"quantity\",\n          \"unit_price\",\n          \"amount\"\n        ]\n      }\n    }\n  },\n  \"required\": [\n    \"vendor_name\",\n    \"invoice_number\",\n    \"invoice_date\",\n    \"currency\",\n    \"subtotal\",\n    \"tax\",\n    \"total\",\n    \"line_items\"\n  ]\n}"
+      },
+      "id": "a6369a37-a405-4988-aa4d-3956e239e137",
+      "name": "Structured output",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1000,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit",
+          "cachedResultName": "Portfolio CRM (n8n demo)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Invoices"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "invoice_number",
+              "lookupValue": "={{ $json.output.invoice_number }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "950b8d88-764b-4a7a-aa1d-a58052da1b05",
+      "name": "Check for duplicate",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1200,
+        100
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Accounts-payable checks before the invoice goes into the books\nconst APPROVAL_LIMIT = 2000; // invoices above this amount need a manager's approval\nconst round = n => Math.round((Number(n) || 0) * 100) / 100;\nconst close = (a, b) => Math.abs(round(a) - round(b)) <= 0.05;\n\nreturn $('AI invoice extraction').all().map((item, i) => {\n  const inv = item.json.output;\n  const file = $('Read PDF text').all()[i]?.json || {};\n  const lines = Array.isArray(inv.line_items) ? inv.line_items : [];\n  const duplicate = $('Check for duplicate').all().some(d => d.json.invoice_number && String(d.json.invoice_number) === String(inv.invoice_number));\n  const issues = [];\n\n  for (const field of ['vendor_name', 'invoice_number', 'invoice_date', 'total']) {\n    if (!inv[field]) issues.push(`Missing ${field.replace('_', ' ')}`);\n  }\n  const linesTotal = lines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);\n  if (lines.length && !close(linesTotal, inv.subtotal)) issues.push(`Line items add up to ${round(linesTotal)}, not the subtotal ${inv.subtotal}`);\n  if (!close((Number(inv.subtotal) || 0) + (Number(inv.tax) || 0), inv.total)) issues.push(`Subtotal + tax does not equal the total ${inv.total}`);\n  for (const l of lines) {\n    if (l.quantity && l.unit_price && !close(l.quantity * l.unit_price, l.amount)) issues.push(`\"${l.description}\": ${l.quantity} x ${l.unit_price} is not ${l.amount}`);\n  }\n  if (duplicate) issues.push(`Duplicate: invoice ${inv.invoice_number} is already in the system`);\n  if (inv.due_date && inv.due_date < $now.toISODate()) issues.push(`Overdue since ${inv.due_date}`);\n\n  const status = issues.length ? 'Needs review' : round(inv.total) > APPROVAL_LIMIT ? 'Needs approval' : 'Ready to pay';\n\n  return {\n    json: {\n      processed_at: $now.toISO(),\n      invoice_number: inv.invoice_number,\n      vendor_name: inv.vendor_name,\n      vendor_email: inv.vendor_email,\n      invoice_date: inv.invoice_date,\n      due_date: inv.due_date,\n      currency: inv.currency,\n      subtotal: round(inv.subtotal),\n      tax: round(inv.tax),\n      total: round(inv.total),\n      po_number: inv.po_number,\n      payment_terms: inv.payment_terms,\n      status,\n      issues: issues.join('; ') || 'None',\n      file_name: file.file_name || $('Read PDF text').all()[i]?.binary?.invoice?.fileName || '',\n      line_items: lines,\n    },\n    pairedItem: { item: i },\n  };\n});"
+      },
+      "id": "02c48110-f2f0-4068-94a7-18e2118e1894",
+      "name": "Validate invoice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit",
+          "cachedResultName": "Portfolio CRM (n8n demo)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Invoices"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "processed_at": "={{ $json.processed_at }}",
+            "invoice_number": "={{ $json.invoice_number }}",
+            "vendor_name": "={{ $json.vendor_name }}",
+            "vendor_email": "={{ $json.vendor_email }}",
+            "invoice_date": "={{ $json.invoice_date }}",
+            "due_date": "={{ $json.due_date }}",
+            "currency": "={{ $json.currency }}",
+            "subtotal": "={{ $json.subtotal }}",
+            "tax": "={{ $json.tax }}",
+            "total": "={{ $json.total }}",
+            "po_number": "={{ $json.po_number }}",
+            "payment_terms": "={{ $json.payment_terms }}",
+            "status": "={{ $json.status }}",
+            "issues": "={{ $json.issues }}",
+            "file_name": "={{ $json.file_name }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "invoice_number",
+              "displayName": "invoice_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "vendor_name",
+              "displayName": "vendor_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "vendor_email",
+              "displayName": "vendor_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "invoice_date",
+              "displayName": "invoice_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "due_date",
+              "displayName": "due_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "currency",
+              "displayName": "currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "subtotal",
+              "displayName": "subtotal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "tax",
+              "displayName": "tax",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "po_number",
+              "displayName": "po_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "payment_terms",
+              "displayName": "payment_terms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "issues",
+              "displayName": "issues",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "file_name",
+              "displayName": "file_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "38760210-7110-4303-839b-417b7f14cac1",
+      "name": "Save invoice",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1640,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#finance"
+        },
+        "text": "={{ { 'Ready to pay': ':white_check_mark:', 'Needs approval': ':raised_hand:', 'Needs review': ':warning:' }[$('Validate invoice').item.json.status] }} *New supplier invoice: {{ $('Validate invoice').item.json.status }}*\n*Vendor:* {{ $('Validate invoice').item.json.vendor_name }}  ·  *Invoice:* {{ $('Validate invoice').item.json.invoice_number }}\n*Amount:* {{ $('Validate invoice').item.json.currency }} {{ Number($('Validate invoice').item.json.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}  (subtotal {{ Number($('Validate invoice').item.json.subtotal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} + tax {{ Number($('Validate invoice').item.json.tax).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }})\n*Invoice date:* {{ $('Validate invoice').item.json.invoice_date }}  ·  *Due:* {{ $('Validate invoice').item.json.due_date || '—' }}  ·  *PO:* {{ $('Validate invoice').item.json.po_number || '—' }}\n*Lines:* {{ $('Validate invoice').item.json.line_items.length }}  ·  *Checks:* {{ $('Validate invoice').item.json.issues }}\n<https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit|Open the invoice log in Google Sheets>",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "1a52aeca-a81f-42ea-959f-86a666fd624f",
+      "name": "Notify finance",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        1880,
+        -20
+      ],
+      "webhookId": "17041edd-f095-42fb-9f5e-94ae2f5146ad"
+    },
+    {
+      "parameters": {
+        "jsCode": "// One row per invoice line for the \"Invoice line items\" tab\n// Read the line items from \"Validate invoice\" (the Sheets append output only holds the saved columns)\nreturn $('Validate invoice').all().flatMap((item, i) =>\n  (item.json.line_items || []).map((l, n) => ({\n    json: {\n      invoice_number: item.json.invoice_number,\n      vendor_name: item.json.vendor_name,\n      line_no: n + 1,\n      description: l.description,\n      quantity: l.quantity,\n      unit_price: l.unit_price,\n      amount: l.amount,\n    },\n    pairedItem: { item: i },\n  }))\n);"
+      },
+      "id": "3c503a72-099a-47ce-8d97-42e757a16e16",
+      "name": "Split line items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1880,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit",
+          "cachedResultName": "Portfolio CRM (n8n demo)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Invoice line items"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_number": "={{ $json.invoice_number }}",
+            "vendor_name": "={{ $json.vendor_name }}",
+            "line_no": "={{ $json.line_no }}",
+            "description": "={{ $json.description }}",
+            "quantity": "={{ $json.quantity }}",
+            "unit_price": "={{ $json.unit_price }}",
+            "amount": "={{ $json.amount }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "invoice_number",
+              "displayName": "invoice_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "vendor_name",
+              "displayName": "vendor_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "line_no",
+              "displayName": "line_no",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "quantity",
+              "displayName": "quantity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "unit_price",
+              "displayName": "unit_price",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "amount",
+              "displayName": "amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "0d7fa9c6-8862-45a6-bf0b-098b7c974c60",
+      "name": "Save line items",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2100,
+        180
+      ]
+    }
+  ],
+  "connections": {
+    "Upload invoice": {
+      "main": [
+        [
+          {
+            "node": "Get PDF from upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get PDF from upload": {
+      "main": [
+        [
+          {
+            "node": "Read PDF text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test with sample invoice": {
+      "main": [
+        [
+          {
+            "node": "Sample invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample invoice": {
+      "main": [
+        [
+          {
+            "node": "Convert to PDF file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to PDF file": {
+      "main": [
+        [
+          {
+            "node": "Read PDF text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read PDF text": {
+      "main": [
+        [
+          {
+            "node": "AI invoice extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral AI": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI invoice extraction",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured output": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI invoice extraction",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI invoice extraction": {
+      "main": [
+        [
+          {
+            "node": "Check for duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for duplicate": {
+      "main": [
+        [
+          {
+            "node": "Validate invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate invoice": {
+      "main": [
+        [
+          {
+            "node": "Save invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save invoice": {
+      "main": [
+        [
+          {
+            "node": "Notify finance",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Split line items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split line items": {
+      "main": [
+        [
+          {
+            "node": "Save line items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

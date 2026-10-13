@@ -1,0 +1,937 @@
+{
+  "name": "[Portfolio] Website lead → CRM → Slack alert + auto-reply",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Website lead capture → AI research → CRM → instant alert\n**Client request:** *\"When someone fills out the contact form on my website, research who they are, add them to our CRM and notify the team on Slack.\"*\n\n1. Form submission comes in  2. Data is cleaned (name casing, lowercase email, phone digits)  3. Spam / junk is filtered out  4. **Business email?** → the company website is fetched (HTTP Request) and turned into text  5. **AI (Mistral)** writes a research brief: company, industry, size, what they want, fit score 1–5, next step  6. Lead is created **or updated** in the Google Sheets CRM (matched on email, no duplicates)  7. Sales gets a Slack alert with the brief (🔥 Hot if budget ≥ $5k)  8. Lead gets an instant thank-you email\n\n*Personal emails (Gmail, Outlook…) skip the website step. CRM = Google Sheet `Leads` tab — swap for HubSpot / Pipedrive / Airtable in one node. AI model = Mistral; swap for Claude / OpenAI in one node.*",
+        "height": 260,
+        "width": 2300
+      },
+      "id": "598d7b08-294f-4b35-a47f-8a1ce61b3cbf",
+      "name": "Note: overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -528
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🔑 Connect before going live\n- **Mistral Cloud** (free API key) on *Mistral AI*\n- **Google Sheets** on *Save lead to CRM*\n- **Slack** on *Alert sales team*\n- **Gmail** on *Auto-reply to lead*",
+        "height": 180,
+        "width": 300,
+        "color": 3
+      },
+      "id": "7ceec5c1-56e5-4435-a488-198ccd342f8e",
+      "name": "Note: credentials",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Let's work together",
+        "formDescription": "Tell us about your project and we'll get back to you within 24 hours.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Full name",
+              "placeholder": "Jane Doe",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email",
+              "fieldType": "email",
+              "placeholder": "jane@company.com",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Phone",
+              "placeholder": "+1 555 123 4567"
+            },
+            {
+              "fieldLabel": "Company",
+              "placeholder": "Acme Inc."
+            },
+            {
+              "fieldLabel": "Budget",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Under $1k"
+                  },
+                  {
+                    "option": "$1k - $5k"
+                  },
+                  {
+                    "option": "$5k - $20k"
+                  },
+                  {
+                    "option": "$20k+"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "How can we help?",
+              "fieldType": "textarea",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "04b85c3e-cbdb-4b82-a837-df581051de53",
+      "name": "Website contact form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "70935fe0-73fe-44ed-8500-c04e44b1d0a0"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f4600336-aafa-4c3c-a939-cf5f260421b0",
+              "name": "full_name",
+              "value": "={{ $json['Full name'].trim().toLowerCase().replace(/\\s+/g, ' ').replace(/(^|[\\s'-])(\\S)/g, (m, p, ch) => p + ch.toUpperCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "d3b8b97f-46e1-442d-be35-b4e08420ed0b",
+              "name": "email",
+              "value": "={{ $json.Email.trim().toLowerCase() }}",
+              "type": "string"
+            },
+            {
+              "id": "f7fa46f4-35b2-4191-8724-210046f1853a",
+              "name": "phone",
+              "value": "={{ ($json.Phone || '').replace(/[^\\d+]/g, '') }}",
+              "type": "string"
+            },
+            {
+              "id": "6007f7f5-1591-4242-b48e-4a8945448487",
+              "name": "company",
+              "value": "={{ ($json.Company || '').trim() || 'N/A' }}",
+              "type": "string"
+            },
+            {
+              "id": "7fe9a8b3-41d2-49cf-b399-b86eb87d9135",
+              "name": "budget",
+              "value": "={{ $json.Budget }}",
+              "type": "string"
+            },
+            {
+              "id": "b4fc9f77-1801-4ecc-9b19-df292a2690f3",
+              "name": "message",
+              "value": "={{ $json['How can we help?'].trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "bcd82430-fcd6-4d65-9573-c11fe879c1b4",
+              "name": "priority",
+              "value": "={{ ['$5k - $20k', '$20k+'].includes($json.Budget) ? 'Hot' : 'Normal' }}",
+              "type": "string"
+            },
+            {
+              "id": "2b16b3d9-ba1b-46cf-9b88-5f9d0602a318",
+              "name": "source",
+              "value": "Website form",
+              "type": "string"
+            },
+            {
+              "id": "ae09aee4-e3e6-4cb3-9030-b92304face33",
+              "name": "status",
+              "value": "New",
+              "type": "string"
+            },
+            {
+              "id": "42750af8-dabe-48ff-9b5b-b28b40545b0f",
+              "name": "submitted_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "42d40807-a29c-45d7-bf98-37154338ead8",
+              "name": "domain",
+              "value": "={{ $json.Email.trim().toLowerCase().split('@')[1] || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "22de93e1-595e-49fc-9867-b86a225f4e18",
+              "name": "is_business_email",
+              "value": "={{ !['gmail.com','googlemail.com','yahoo.com','yahoo.gr','hotmail.com','outlook.com','live.com','icloud.com','me.com','aol.com','proton.me','protonmail.com','gmx.com','gmx.de','mail.com','yandex.com','zoho.com'].includes($json.Email.trim().toLowerCase().split('@')[1]) }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a7985a42-ef94-4c49-831f-43442eeef06c",
+      "name": "Clean & format lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ca5ca6f1-83bd-4df3-9c66-bc63b535721a",
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "9d7eacec-03be-4986-9994-33fd4b67516e",
+              "leftValue": "={{ $json.message.length }}",
+              "rightValue": 10,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "44e7acd8-a246-4888-8fe5-5197e1076fbe",
+              "leftValue": "={{ $json.message.toLowerCase() }}",
+              "rightValue": "(viagra|casino|crypto giveaway|seo services)",
+              "operator": {
+                "type": "string",
+                "operation": "notRegex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6b36af69-e3b9-4299-a880-8175775a6be8",
+      "name": "Valid lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "45d3a24d-eaa9-478b-a66f-49fa56a3c227",
+      "name": "Ignore spam",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        688,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#sales-leads"
+        },
+        "text": "={{ $('Build CRM record').item.json.priority === 'Hot' ? ':fire: *HOT lead*' : ':wave: *New lead*' }} from the website  ·  fit {{ $('Build CRM record').item.json.fit_score }}/5\n*Name:* {{ $('Build CRM record').item.json.full_name }}\n*Company:* {{ $('Build CRM record').item.json.company }}{{ [$('Build CRM record').item.json.industry, $('Build CRM record').item.json.company_size !== 'Unknown' ? $('Build CRM record').item.json.company_size + ' people' : ''].filter(v => v && v !== 'Unknown').join(', ').replace(/^(.+)$/, ' ($1)') }}\n*What they do:* {{ $('Build CRM record').item.json.what_they_do }}\n*Email:* {{ $('Build CRM record').item.json.email }}  ·  *Phone:* {{ $('Build CRM record').item.json.phone || '—' }}\n*Budget:* {{ $('Build CRM record').item.json.budget }}\n*They want:* {{ $('Build CRM record').item.json.lead_intent }}\n*Suggested next step:* {{ $('Build CRM record').item.json.suggested_next_step }}\n*Message:*\n>{{ $('Build CRM record').item.json.message }}",
+        "otherOptions": {},
+        "authentication": "oAuth2"
+      },
+      "id": "fb80095c-41d0-4279-84c3-b2e2f68dc1ce",
+      "name": "Alert sales team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2160,
+        -224
+      ],
+      "webhookId": "cacea699-fbb4-4fbe-8878-f37e25d6106f"
+    },
+    {
+      "parameters": {
+        "sendTo": "you@example.com",
+        "subject": "=Thanks for reaching out, {{ $('Build CRM record').item.json.full_name.split(' ')[0] }}!",
+        "emailType": "text",
+        "message": "=Hi {{ $('Build CRM record').item.json.full_name.split(' ')[0] }},\n\nThanks for getting in touch! We've received your message and someone from our team will reply within 24 hours.\n\nFor reference, here's what you sent us:\n\"{{ $('Build CRM record').item.json.message }}\"\n\nTalk soon,\nThe Team\n\n---\n[Demo mode: in production this email goes to {{ $('Build CRM record').item.json.email }}]",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ce9389de-7587-4441-8b3d-8d91e595cd5e",
+      "name": "Auto-reply to lead",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2160,
+        0
+      ],
+      "webhookId": "203a85d5-8264-4564-b8f2-ffc8786d6052"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7d009e85-f275-46c3-9907-93361bdecc7b",
+              "leftValue": "={{ $json.is_business_email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "190ac2fc-876e-46b5-8fc4-506ba2b00d0d",
+      "name": "Business email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        688,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $json.domain }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.9"
+            }
+          ]
+        },
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "html"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "97b14826-8cd5-4eed-bf6e-af5f6d81eefc",
+      "name": "Fetch company website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        -208
+      ],
+      "alwaysOutputData": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn the raw HTML of the lead's company website into clean text the AI can read\nconst cp = (n) => { try { return String.fromCodePoint(n); } catch (e) { return ' '; } };\nconst decode = (s) => s\n  .replace(/&#x([0-9a-f]+);/gi, (_, h) => cp(parseInt(h, 16)))\n  .replace(/&#(\\d+);/g, (_, d) => cp(Number(d)))\n  .replace(/&nbsp;/gi, ' ').replace(/&quot;/gi, '\"').replace(/&apos;/gi, \"'\")\n  .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&amp;/gi, '&')\n  .replace(/&[a-z]+;/gi, ' ');\nconst clean = (s) => decode(s || '').replace(/\\s+/g, ' ').trim();\n\nreturn $input.all().map((item, i) => {\n  const lead = $('Clean & format lead').itemMatching(i).json;\n  const html = typeof item.json.html === 'string' ? item.json.html : '';\n\n  const title = (html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i) || [])[1];\n  // <meta name=\"description\" content=\"...\"> in any attribute order, with ' or \" quotes\n  const metaTag = (html.match(/<meta\\b[^>]*(?:name|property)\\s*=\\s*[\"'](?:og:)?description[\"'][^>]*>/i) || [''])[0];\n  const m = metaTag.match(/content\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')/i) || [];\n  const description = m[1] || m[2] || '';\n\n  const text = clean(html\n    .replace(/<!--[\\s\\S]*?-->/g, ' ')\n    .replace(/<(script|style|noscript|svg|head|nav|footer|select|template)\\b[\\s\\S]*?<\\/\\1>/gi, ' ')\n    .replace(/<[^>]+>/g, ' '));\n\n  return {\n    json: {\n      ...lead,\n      website_url: 'https://' + lead.domain,\n      website_title: clean(title),\n      website_description: clean(description),\n      website_text: text.slice(0, 3000),\n    },\n    pairedItem: { item: i },\n  };\n});"
+      },
+      "id": "58470058-3015-40ae-8c49-1cf64aac7ff1",
+      "name": "Extract website text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=LEAD\nName: {{ $json.full_name }}\nEmail: {{ $json.email }}\nCompany (as typed in the form): {{ $json.company }}\nBudget: {{ $json.budget }}\nMessage: {{ $json.message }}\n\nCOMPANY WEBSITE ({{ $json.website_url || 'not checked: personal email address' }})\nTitle: {{ $json.website_title || '-' }}\nDescription: {{ $json.website_description || '-' }}\nPage text: {{ $json.website_text || '-' }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a sales research assistant at an automation agency (we build n8n / AI automations for clients). A new prospective client just filled in our contact form. Write a short research brief for our sales team.\n\nRules:\n- Use ONLY the lead details and the website text provided. Never invent facts about the company.\n- company_size: only if the website text states it, or the lead's message makes it obvious (e.g. 'I run a small shop' = 1-10). Never estimate from how famous a brand is. Otherwise 'Unknown'.\n- If the website text is missing or doesn't describe a business, use 'Unknown' for company_name (unless the lead typed one), industry and what_they_do.\n- lead_intent: what they want US to build for them.\n- suggested_next_step: one concrete action for OUR sales rep to win this project (e.g. book a discovery call, send a relevant case study, propose a fixed-price pilot).\n- fit_score: 5 = clear automation need + budget $5k or more + real business; 1 = vague, tiny budget or unclear intent.\n- Keep every text field to one short sentence."
+            }
+          ]
+        },
+        "batching": {
+          "batchSize": 1,
+          "delayBetweenBatches": 1500
+        }
+      },
+      "id": "79707ac3-f472-4150-945d-108b3a6893b9",
+      "name": "AI lead research",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1360,
+        -96
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"company_name\": {\n      \"type\": \"string\",\n      \"description\": \"Company name, or 'Unknown'\"\n    },\n    \"industry\": {\n      \"type\": \"string\",\n      \"description\": \"Short industry label, e.g. 'Logistics', 'E-commerce', or 'Unknown'\"\n    },\n    \"what_they_do\": {\n      \"type\": \"string\",\n      \"description\": \"One sentence on what the company does, or 'Unknown'\"\n    },\n    \"company_size\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"1-10\",\n        \"11-50\",\n        \"51-200\",\n        \"201-1000\",\n        \"1000+\",\n        \"Unknown\"\n      ],\n      \"description\": \"Number of EMPLOYEES (not customers or users). Only if the website states the team size or the message makes it obvious; otherwise 'Unknown'.\"\n    },\n    \"lead_intent\": {\n      \"type\": \"string\",\n      \"description\": \"One sentence: what the lead wants from us\"\n    },\n    \"fit_score\": {\n      \"type\": \"integer\",\n      \"description\": \"1 (poor fit) to 5 (ideal client), based on budget, intent and company\"\n    },\n    \"suggested_next_step\": {\n      \"type\": \"string\",\n      \"description\": \"One concrete next step for the sales rep\"\n    }\n  },\n  \"required\": [\n    \"company_name\",\n    \"industry\",\n    \"what_they_do\",\n    \"company_size\",\n    \"lead_intent\",\n    \"fit_score\",\n    \"suggested_next_step\"\n  ]\n}"
+      },
+      "id": "e5dc2144-d603-4955-a846-698cfb51adbf",
+      "name": "Structured output",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1488,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "523de21a-f865-4ec5-94ae-481d0db114b4",
+              "name": "submitted_at",
+              "value": "={{ $('Clean & format lead').item.json.submitted_at }}",
+              "type": "string"
+            },
+            {
+              "id": "7a876276-2e2e-4b0f-82cf-ae273c0f961c",
+              "name": "full_name",
+              "value": "={{ $('Clean & format lead').item.json.full_name }}",
+              "type": "string"
+            },
+            {
+              "id": "b162547a-2a8e-4253-b4fd-a2e6f8c9f80e",
+              "name": "email",
+              "value": "={{ $('Clean & format lead').item.json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "1447f27f-b03f-4340-a0b7-80169a891515",
+              "name": "phone",
+              "value": "={{ $('Clean & format lead').item.json.phone }}",
+              "type": "string"
+            },
+            {
+              "id": "9198f7ae-29f2-44c8-8151-d70a595fb95a",
+              "name": "company",
+              "value": "={{ $json.output.company_name && $json.output.company_name !== 'Unknown' ? $json.output.company_name : $('Clean & format lead').item.json.company }}",
+              "type": "string"
+            },
+            {
+              "id": "f277c3b7-8a83-48f5-9491-c0ed15ddc0bd",
+              "name": "budget",
+              "value": "={{ $('Clean & format lead').item.json.budget }}",
+              "type": "string"
+            },
+            {
+              "id": "15252921-3fd4-431b-9a20-e3c23b90710e",
+              "name": "priority",
+              "value": "={{ $('Clean & format lead').item.json.priority }}",
+              "type": "string"
+            },
+            {
+              "id": "c35de1aa-e631-42d6-9870-a6778166cbd8",
+              "name": "fit_score",
+              "value": "={{ $json.output.fit_score }}",
+              "type": "string"
+            },
+            {
+              "id": "aaa2b94d-de40-437a-bf8b-d739f1f3724c",
+              "name": "industry",
+              "value": "={{ $json.output.industry }}",
+              "type": "string"
+            },
+            {
+              "id": "426201f1-e2ff-4b0d-af94-0301a0ae51f5",
+              "name": "company_size",
+              "value": "={{ $('Clean & format lead').item.json.is_business_email && !/employees|team of|staff of|people on our team/i.test($('Extract website text').item.json.website_text || '') ? 'Unknown' : $json.output.company_size }}",
+              "type": "string"
+            },
+            {
+              "id": "22d6a9da-8b9d-47dc-99cb-23b4fd6e7379",
+              "name": "what_they_do",
+              "value": "={{ $json.output.what_they_do }}",
+              "type": "string"
+            },
+            {
+              "id": "d092cdf1-33a7-4c78-9e8e-797510e177c0",
+              "name": "lead_intent",
+              "value": "={{ $json.output.lead_intent }}",
+              "type": "string"
+            },
+            {
+              "id": "984e49b2-9f41-46cb-8562-117aa189f01c",
+              "name": "suggested_next_step",
+              "value": "={{ $json.output.suggested_next_step }}",
+              "type": "string"
+            },
+            {
+              "id": "c3c3e18e-265f-415e-bef4-be5c432f9826",
+              "name": "website",
+              "value": "={{ $('Clean & format lead').item.json.is_business_email ? 'https://' + $('Clean & format lead').item.json.domain : '' }}",
+              "type": "string"
+            },
+            {
+              "id": "0f9b82aa-b805-4282-ab8b-d0ce5bc632db",
+              "name": "message",
+              "value": "={{ $('Clean & format lead').item.json.message }}",
+              "type": "string"
+            },
+            {
+              "id": "17f7da67-89d1-4f37-aefb-cb65082788b7",
+              "name": "source",
+              "value": "={{ $('Clean & format lead').item.json.source }}",
+              "type": "string"
+            },
+            {
+              "id": "ccc2d5d8-d7b9-4f1c-b1ec-8e3e8d2567f0",
+              "name": "status",
+              "value": "={{ $('Clean & format lead').item.json.status }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fbee8ac9-1e1d-49aa-9eac-133058b719de",
+      "name": "Build CRM record",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1712,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit",
+          "cachedResultName": "Portfolio CRM (n8n demo)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "email"
+          ],
+          "schema": [
+            {
+              "id": "submitted_at",
+              "displayName": "submitted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "budget",
+              "displayName": "budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fit_score",
+              "displayName": "fit_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "industry",
+              "displayName": "industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company_size",
+              "displayName": "company_size",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "what_they_do",
+              "displayName": "what_they_do",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lead_intent",
+              "displayName": "lead_intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "suggested_next_step",
+              "displayName": "suggested_next_step",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "website",
+              "displayName": "website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "9a6d7272-6478-49fb-be05-89dd986613fa",
+      "name": "Save lead to CRM (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "model": "open-mistral-nemo",
+        "options": {
+          "temperature": 0.2,
+          "maxRetries": 4
+        }
+      },
+      "id": "ea7472f2-5cc9-4189-9da1-c5f1efc92c61",
+      "name": "Mistral AI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatMistralCloud",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🛡️ Demo mode\nAll emails go to the owner's test inbox (**you@example.com**), never to the person who filled in the form.\nFor production: set *To* on **Auto-reply to lead** to `{{ $('Build CRM record').item.json.email }}`.",
+        "height": 160,
+        "width": 320,
+        "color": 5
+      },
+      "id": "6c770dbc-775e-45e4-8806-65bf6487aeb4",
+      "name": "Note: demo mode",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2260,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Website contact form": {
+      "main": [
+        [
+          {
+            "node": "Clean & format lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean & format lead": {
+      "main": [
+        [
+          {
+            "node": "Valid lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid lead?": {
+      "main": [
+        [
+          {
+            "node": "Business email?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignore spam",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Business email?": {
+      "main": [
+        [
+          {
+            "node": "Fetch company website",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI lead research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch company website": {
+      "main": [
+        [
+          {
+            "node": "Extract website text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract website text": {
+      "main": [
+        [
+          {
+            "node": "AI lead research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured output": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI lead research",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI lead research": {
+      "main": [
+        [
+          {
+            "node": "Build CRM record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build CRM record": {
+      "main": [
+        [
+          {
+            "node": "Save lead to CRM (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save lead to CRM (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Alert sales team",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Auto-reply to lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral AI": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI lead research",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

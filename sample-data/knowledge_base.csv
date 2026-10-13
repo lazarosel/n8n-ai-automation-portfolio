@@ -1,0 +1,7 @@
+topic,keywords,answer
+Reset password,"password,reset,login,locked,sign in","Go to Settings > Security > Reset password, or click ""Forgot password"" on the login page. The reset link is valid for 30 minutes."
+Billing date & invoices,"invoice,billing,receipt,charge,vat","Invoices are emailed on the 1st of each month and are available under Account > Billing > Invoices. You can add a VAT number there too."
+Refund policy,"refund,money back,cancel,chargeback","We offer full refunds within 14 days of purchase. After 14 days, refunds are pro-rated and require approval from the billing team."
+Shipping times,"shipping,delivery,tracking,order status,where is my order","Orders ship within 2 business days. EU delivery takes 3-5 days, US 5-8 days. A tracking link is emailed once the order ships."
+Change plan,"upgrade,downgrade,plan,pricing,seats","You can upgrade or downgrade anytime under Account > Plan. Upgrades apply immediately; downgrades apply at the next billing cycle."
+API & integrations,"api,integration,webhook,zapier,error,500","API docs are at docs.example.com/api. API keys are under Settings > Developers. Webhook retries happen 3 times over 1 hour."

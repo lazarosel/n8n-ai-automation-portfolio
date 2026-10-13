@@ -1,0 +1,1 @@
+processed_at,invoice_number,vendor_name,vendor_email,invoice_date,due_date,currency,subtotal,tax,total,po_number,payment_terms,status,issues,file_name
