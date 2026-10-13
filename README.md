@@ -103,3 +103,5 @@ Every workflow here was built, tested node by node, and run end to end on n8n Cl
 ---
 
 Built by **Lazaros Eleftheriadis**, n8n & AI automation. Open to freelance projects.
+
+Licensed under the [MIT License](LICENSE): free to use, adapt and build on.
